@@ -1,0 +1,8 @@
+# Install inside the existing server environment `3dinvnet`.
+# PyTorch is intentionally excluded: keep torch 2.7.1+cu128 for RTX 5090.
+numpy==1.26.4
+scipy==1.13.1
+h5py==3.16.0
+scikit-image==0.24.0
+PyYAML==6.0.2
+

@@ -1,0 +1,37 @@
+# Values explicitly reported by Li et al. (JAG, 2026) are marked "paper".
+# Values absent from the paper are engineering defaults and must be tuned.
+seed: 42                         # not reported
+device: cuda
+output_dir: runs/paper_default
+
+data:
+  train_manifest: prepared_data/train.csv
+  val_manifest: prepared_data/val.csv
+  test_manifest: prepared_data/test.csv
+  simulated_manifest: null       # set during real-data joint fine-tuning
+  real_manifest: null             # set during real-data joint fine-tuning
+  shape: [20, 54, 512]            # paper, Section 2.1
+  axis_order: [0, 1, 2]
+  input_normalization: zscore     # not reported
+  target_scale: 1.0               # raw relative permittivity, paper Eq. (6)
+  num_workers: 0                  # not reported
+
+model:
+  features: [1, 2, 4, 8, 16]      # paper, Fig. 2; five extraction modules
+  activation: relu                # not reported
+  normalization: batch            # not reported; prevents measured signal collapse
+  fusion_hidden_channels: 8       # not reported; paper specifies six 1x1 layers
+  output_mode: full                # full|vertical|channel_crossed|equal_fusion|learned_fusion
+  return_intermediates: true
+
+train:
+  batch_size: 1                   # not reported; safe default for full volumes
+  epochs: 100                     # not reported
+  learning_rate: 0.001            # not reported
+  weight_decay: 0.0               # not reported
+  optimizer: adamax               # paper, Section 3.2
+  loss: mse                       # paper, Eq. (6)
+  select_metric: loss             # validation MSE; paper does not report checkpoint policy
+  amp: true                       # not reported
+  pretrained: null
+  checkpoint_every: 10

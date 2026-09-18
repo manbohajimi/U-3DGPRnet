@@ -1,0 +1,37 @@
+# Pipeline/overfit validation on the author's public, lossy PNG examples.
+# This is not the 1036-scene paper experiment.
+seed: 42
+device: cuda
+output_dir: runs/author_examples
+
+data:
+  train_manifest: prepared_author_examples/train.csv
+  val_manifest: prepared_author_examples/val.csv
+  test_manifest: prepared_author_examples/test.csv
+  simulated_manifest: null
+  real_manifest: null
+  shape: [20, 54, 512]
+  axis_order: [0, 1, 2]
+  input_normalization: zscore
+  target_scale: 1.0
+  num_workers: 0
+
+model:
+  features: [1, 2, 4, 8, 16]
+  activation: relu
+  normalization: batch
+  fusion_hidden_channels: 8
+  output_mode: full
+  return_intermediates: true
+
+train:
+  batch_size: 1
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0
+  optimizer: adamax
+  loss: mse
+  select_metric: loss
+  amp: true
+  pretrained: null
+  checkpoint_every: 10

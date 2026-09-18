@@ -1,0 +1,57 @@
+# U-3DGPR-Net paper architecture trained on the 3DInvNet dataset. 3DInvNet is
+# already a regular 128^3 grid; only its storage order is mapped to the two
+# orthogonal B-scan views used by U-3DGPR-Net.
+seed: 42
+device: cuda
+output_dir: /home/bqwang/project/GPR/outputs/u3dgpr/transfer_3dinvnet
+
+data:
+  # 统一划分：与 3DInvNet / EMDAInvNet 使用完全相同的 5850 训 / 150 val 上游协议，
+  # 否则本模型训练集只有 5265 例，跨模型不可比。val 即官方 test（上游协议自带）。
+  train_manifest: /home/bqwang/project/GPR/data/processed/u3dgpr/train.csv
+  val_manifest: /home/bqwang/project/GPR/data/processed/u3dgpr/val.csv
+  test_manifest: /home/bqwang/project/GPR/data/processed/u3dgpr/test.csv
+  allow_val_test_overlap: true   # 显式声明接受 val∩test=150；关闭则维持硬拦截
+  simulated_manifest: null
+  real_manifest: null
+  shape: [128, 128, 128]
+  axis_order: [1, 2, 0]          # 3DInvNet source [time/depth, x, y] -> [x, y, time/depth]
+  # Match the official 3DInvNet loader: (clean_data + 9) / 18. Per-volume
+  # z-score erased absolute amplitude information used by the inversion.
+  input_normalization: fixed_minmax
+  input_min: -9.0
+  input_max: 9.0
+  target_scale: 1.0
+  num_workers: 4
+
+model:
+  # Keep the feature widths and asymmetric channel-crossed kernels reported in
+  # Fig. 2. Capacity changes belong in a separate ablation, not strict repro.
+  features: [1, 2, 4, 8, 16]
+  activation: relu
+  normalization: batch
+  fusion_hidden_channels: 8
+  channel_kernels: [3, 3, 3, 1, 1]
+  channel_up_kernels: [1, 1, 2, 2]
+  normalize_final_decoder: false
+  output_mode: full
+  output_bias_init: 4.0
+  output_weight_init: 0.1
+  fusion_logit_init_std: 0.001
+  return_intermediates: true
+
+train:
+  batch_size: 1
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0
+  optimizer: adamax
+  # Equation (6): global MSE. The previous balanced MSE over-weighted each
+  # sparse target voxel by hundreds of times and produced the observed halo.
+  loss: mse
+  mask_threshold: 6.0
+  select_metric: loss
+  select_mode: min
+  amp: true
+  pretrained: null
+  checkpoint_every: 10
