@@ -51,7 +51,11 @@ def main() -> None:
         for key, value in config["model"].items()
         if key != "return_intermediates"
     }
-    model = U3DGPRNet(**model_kwargs).to(device).eval()
+    # This is an initialization/training-path smoke test. Fresh BatchNorm
+    # running statistics are still (0,1), so eval mode before any training is
+    # not a valid branch-survival probe. Checkpoint inference must be tested
+    # separately after its running statistics have been learned.
+    model = U3DGPRNet(**model_kwargs).to(device).train()
     # CUDA checks the actual 3DInvNet benchmark volume; the smaller CPU shape
     # keeps this dependency-free smoke test practical on developer machines.
     spatial_shape = (128, 128, 128) if device.type == "cuda" else (16, 16, 32)
@@ -61,7 +65,7 @@ def main() -> None:
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
-    with torch.inference_mode():
+    with torch.no_grad():
         output = model(volume)
         second_output = model(second_volume)
     if device.type == "cuda":

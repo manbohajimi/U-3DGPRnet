@@ -199,7 +199,13 @@ class U3DGPROutput:
 
 
 class U3DGPRNet(nn.Module):
-    """Dual-direction U-3DGPR-Net for volumes ordered as [B, 1, C, X, T]."""
+    """Dual-direction U-3DGPR-Net for canonical ``[B,1,C,D,T]`` volumes.
+
+    For 3DInvNet, source ``[t,x,y]`` is transposed to ``[C,D,T]=[y,x,t]``.
+    ``C=y`` is the channel-crossed/crossline axis and ``D=x`` is the detection
+    direction. The label follows the same mapping with depth ``z`` in place
+    of sampling time ``t``.
+    """
 
     def __init__(
         self,
@@ -291,27 +297,39 @@ class U3DGPRNet(nn.Module):
     @staticmethod
     def _validate(x: Tensor) -> None:
         if x.ndim != 5 or x.shape[1] != 1:
-            raise ValueError(f"Expected [B, 1, channels, survey, time], got {tuple(x.shape)}")
+            raise ValueError(f"Expected [B,1,C,D,T], got {tuple(x.shape)}")
 
     def forward(self, x: Tensor) -> U3DGPROutput:
         self._validate(x)
-        batch, _, channels, survey, time = x.shape
+        batch, _, channel_count, detection_count, sample_count = x.shape
 
         vertical: Tensor | None = None
         channel_crossed: Tensor | None = None
         if self.output_mode != "channel_crossed":
-            vertical_slices = x[:, 0].reshape(batch * channels, 1, survey, time)
+            # Fix C=y and retain [D,T]=[x,t]: the paper's vertical direction
+            # plane (detection direction x sampling/depth).
+            vertical_slices = x[:, 0].reshape(
+                batch * channel_count, 1, detection_count, sample_count
+            )
             vertical = self.vertical_branch(vertical_slices)
-            vertical = vertical.reshape(batch, channels, survey, time).unsqueeze(1)
+            vertical = vertical.reshape(
+                batch, channel_count, detection_count, sample_count
+            ).unsqueeze(1)
             if self.output_mode == "vertical":
                 # Staged training must not execute inactive branches: doing so
                 # used to update their BatchNorm running statistics even though
                 # the optimizer did not own their parameters.
                 return U3DGPROutput(vertical, vertical, None, None, None)
 
-        crossed_slices = x[:, 0].permute(0, 2, 1, 3).reshape(batch * survey, 1, channels, time)
+        # Fix D=x and retain [C,T]=[y,t], explicitly matching the paper's
+        # channel-crossed 2-D input (20,512) in its native acquisition setup.
+        crossed_slices = x[:, 0].permute(0, 2, 1, 3).reshape(
+            batch * detection_count, 1, channel_count, sample_count
+        )
         channel_crossed = self.channel_branch(crossed_slices)
-        channel_crossed = channel_crossed.reshape(batch, survey, channels, time)
+        channel_crossed = channel_crossed.reshape(
+            batch, detection_count, channel_count, sample_count
+        )
         channel_crossed = channel_crossed.permute(0, 2, 1, 3).unsqueeze(1)
         if self.output_mode == "channel_crossed":
             return U3DGPROutput(channel_crossed, None, channel_crossed, None, None)
@@ -323,7 +341,11 @@ class U3DGPRNet(nn.Module):
         elif self.output_mode == "learned_fusion":
             reconstruction = raw_fused
         else:
-            refine_slices = raw_fused[:, 0].reshape(batch * channels, 1, survey, time)
+            refine_slices = raw_fused[:, 0].reshape(
+                batch * channel_count, 1, detection_count, sample_count
+            )
             reconstruction = self.refiner(refine_slices)
-            reconstruction = reconstruction.reshape(batch, channels, survey, time).unsqueeze(1)
+            reconstruction = reconstruction.reshape(
+                batch, channel_count, detection_count, sample_count
+            ).unsqueeze(1)
         return U3DGPROutput(reconstruction, vertical, channel_crossed, weights, raw_fused)

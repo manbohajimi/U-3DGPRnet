@@ -114,7 +114,8 @@ class GPRVolumeDataset(Dataset):
         row = self.rows[index]
         gpr = load_array(row["input"], key="gpr")
         target = load_array(row["target"], key="permittivity")
-        # Convert source storage order to model order [channel, survey, time].
+        # 3DInvNet input: [t,x,y] -> canonical [C,D,T]=[y,x,t].
+        # 3DInvNet label: [z,x,y] -> canonical [C,D,Z]=[y,x,z].
         # This must happen before resize; cubic 128^3 arrays otherwise conceal
         # an incorrect axis interpretation because their shapes do not change.
         gpr = np.transpose(gpr, self.axis_order)

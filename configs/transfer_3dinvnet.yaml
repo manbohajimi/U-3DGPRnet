@@ -15,7 +15,11 @@ data:
   simulated_manifest: null
   real_manifest: null
   shape: null                   # preserve each native 3DInvNet 128^3 volume
-  axis_order: [1, 2, 0]          # 3DInvNet source [time/depth, x, y] -> [x, y, time/depth]
+  # GPR source [t,x,y] -> model [C,D,T]=[y,x,t]. Here x is the inline
+  # detection direction inside a B-scan and y indexes the stacked crosslines
+  # (channels). Target: [z,x,y] -> [C,D,Z]=[y,x,z]. Thus vertical slices are
+  # [x,t]=[D,T] at fixed y; channel-crossed slices are [y,t]=[C,T] at fixed x.
+  axis_order: [2, 1, 0]
   # Match the official 3DInvNet loader: (clean_data + 9) / 18. Per-volume
   # z-score erased absolute amplitude information used by the inversion.
   input_normalization: fixed_minmax
@@ -29,15 +33,14 @@ model:
   # Fig. 2. Capacity changes belong in a separate ablation, not strict repro.
   features: [1, 2, 4, 8, 16]
   activation: relu
-  # With fixed-minmax 3DInvNet inputs (std ~= 0.0027), the 83-ReLU narrow
-  # network collapses its vertical branch when normalization is disabled.
-  # BatchNorm is already covered by the failed run; GroupNorm keeps both
-  # branches alive without running-statistics dependence.
-  normalization: group
+  # No normalization type is reported in the paper. Plain BatchNorm2d is used
+  # as the minimal practical completion because `none` kills the vertical
+  # branch at the fixed-minmax 3DInvNet signal scale.
+  normalization: batch
   fusion_hidden_channels: 8
   channel_kernels: [3, 3, 3, 1, 1]
   channel_up_kernels: [1, 1, 2, 2]
-  normalize_final_decoder: false
+  normalize_final_decoder: true
   output_mode: full
   output_bias_init: 4.0
   output_weight_init: 0.1

@@ -1,8 +1,43 @@
 import torch
 import yaml
 from pathlib import Path
+from torch import nn
 
 from u3dgpr.model import U3DGPRNet
+
+
+class _RecordIdentity(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seen = None
+
+    def forward(self, x):
+        self.seen = x.detach().clone()
+        return x
+
+
+def test_directional_slices_follow_txy_physical_axes():
+    # Source storage is [t,x,y]; canonical model storage is [C,D,T]=[y,x,t].
+    source_txy = torch.arange(5 * 2 * 3, dtype=torch.float32).reshape(5, 2, 3)
+    canonical = source_txy.permute(2, 1, 0).unsqueeze(0).unsqueeze(0)
+
+    vertical_model = U3DGPRNet(output_mode="vertical")
+    vertical_recorder = _RecordIdentity()
+    vertical_model.vertical_branch = vertical_recorder
+    vertical_model(canonical)
+    expected_vertical = canonical[:, 0].reshape(3, 1, 2, 5)
+    assert torch.equal(vertical_recorder.seen, expected_vertical)
+    # Every vertical plane fixes y/C and contains [x,t]=[D,T].
+    assert torch.equal(vertical_recorder.seen[0, 0], source_txy[:, :, 0].permute(1, 0))
+
+    crossed_model = U3DGPRNet(output_mode="channel_crossed")
+    crossed_recorder = _RecordIdentity()
+    crossed_model.channel_branch = crossed_recorder
+    crossed_model(canonical)
+    expected_crossed = canonical[:, 0].permute(0, 2, 1, 3).reshape(2, 1, 3, 5)
+    assert torch.equal(crossed_recorder.seen, expected_crossed)
+    # Every channel-crossed plane fixes x/D and contains [y,t]=[C,T].
+    assert torch.equal(crossed_recorder.seen[0, 0], source_txy[:, 0, :].permute(1, 0))
 
 
 def test_full_benchmark_compatible_shape_and_exact_initial_weights():

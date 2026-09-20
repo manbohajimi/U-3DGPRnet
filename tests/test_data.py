@@ -12,11 +12,12 @@ def test_fixed_minmax_matches_official_3dinvnet_loader():
 
 
 def test_axis_order_is_applied_before_cubic_shape_short_circuit(tmp_path):
-    source = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
+    # Deliberately non-cubic [t,x,y] dimensions make an axis swap observable.
+    source_txy = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
     input_path = tmp_path / "input.npy"
     target_path = tmp_path / "target.npy"
-    np.save(input_path, source)
-    np.save(target_path, source + 100)
+    np.save(input_path, source_txy)
+    np.save(target_path, source_txy + 100)
     manifest = tmp_path / "manifest.csv"
     with manifest.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=("id", "input", "target"))
@@ -25,13 +26,15 @@ def test_axis_order_is_applied_before_cubic_shape_short_circuit(tmp_path):
 
     dataset = GPRVolumeDataset(
         manifest,
-        shape=(3, 4, 2),
+        shape=(4, 3, 2),
         input_normalization="none",
-        axis_order=(1, 2, 0),
+        axis_order=(2, 1, 0),
     )
     sample = dataset[0]
-    np.testing.assert_array_equal(sample["gpr"][0].numpy(), source.transpose(1, 2, 0))
-    np.testing.assert_array_equal(sample["target"][0].numpy(), (source + 100).transpose(1, 2, 0))
+    np.testing.assert_array_equal(sample["gpr"][0].numpy(), source_txy.transpose(2, 1, 0))
+    np.testing.assert_array_equal(
+        sample["target"][0].numpy(), (source_txy + 100).transpose(2, 1, 0)
+    )
 
 
 def test_native_shape_mode_does_not_resize_benchmark_volume(tmp_path):
@@ -50,7 +53,7 @@ def test_native_shape_mode_does_not_resize_benchmark_volume(tmp_path):
         manifest,
         shape=None,
         input_normalization="none",
-        axis_order=(1, 2, 0),
+        axis_order=(2, 1, 0),
     )[0]
-    assert sample["gpr"].shape == (1, 5, 6, 4)
-    np.testing.assert_array_equal(sample["gpr"][0].numpy(), source.transpose(1, 2, 0))
+    assert sample["gpr"].shape == (1, 6, 5, 4)
+    np.testing.assert_array_equal(sample["gpr"][0].numpy(), source.transpose(2, 1, 0))
