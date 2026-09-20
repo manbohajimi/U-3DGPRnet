@@ -13,7 +13,6 @@ from typing import Iterable
 
 import torch
 from torch import Tensor, nn
-import torch.nn.functional as F
 
 
 def _activation(name: str) -> nn.Module:
@@ -27,9 +26,8 @@ def _activation(name: str) -> nn.Module:
 def _normalization(name: str, channels: int) -> nn.Module:
     """Build an explicit signal-stabilization layer.
 
-    The paper does not report normalization. ``batch`` is an engineering
-    default used to make the very narrow Fig. 2 network trainable, not a
-    claimed paper hyperparameter.
+    The paper does not report normalization, so ``none`` is the default.
+    Other modes remain available only for explicit ablation experiments.
     """
 
     if name == "none":
@@ -81,8 +79,8 @@ class ConvBlock(nn.Module):
 class DirectionalUNet2D(nn.Module):
     """Small 2-D U-Net used for one acquisition direction.
 
-    Transposed convolutions follow the paper. Interpolation only resolves odd
-    dimensions (54 -> 27 -> 13 -> 6 -> 3) before concatenating skip features.
+    Transposed convolutions follow the paper and directly request each skip
+    feature's spatial size; no interpolation is inserted in the decoder.
     """
 
     def __init__(
@@ -90,7 +88,7 @@ class DirectionalUNet2D(nn.Module):
         features: Iterable[int] = (1, 2, 4, 8, 16),
         kernels: Iterable[int] = (3, 3, 3, 3, 3),
         activation: str = "relu",
-        normalization: str = "batch",
+        normalization: str = "none",
         up_kernels: Iterable[int] = (2, 2, 2, 2),
         normalize_final_decoder: bool = True,
     ):
@@ -145,12 +143,6 @@ class DirectionalUNet2D(nn.Module):
             current = skip_width
         self.output = nn.Conv2d(widths[0], 1, kernel_size=1)
 
-    @staticmethod
-    def _match(x: Tensor, reference: Tensor) -> Tensor:
-        if x.shape[-2:] != reference.shape[-2:]:
-            x = F.interpolate(x, size=reference.shape[-2:], mode="bilinear", align_corners=False)
-        return x
-
     def forward(self, x: Tensor) -> Tensor:
         skips: list[Tensor] = []
         for index, encoder in enumerate(self.encoders):
@@ -160,13 +152,23 @@ class DirectionalUNet2D(nn.Module):
                 x = self.pool(x)
 
         for upconv, decoder, skip in zip(self.upconvs, self.decoders, reversed(skips[:-1])):
-            x = self._match(upconv(x), skip)
+            try:
+                # Let the transposed convolution itself resolve the optional
+                # output_padding needed by odd encoder sizes. Silent bilinear
+                # resizing here would add an operation absent from Fig. 2.
+                x = upconv(x, output_size=skip.shape[-2:])
+            except ValueError as error:
+                raise ValueError(
+                    "Decoder ConvTranspose2d cannot reach skip size "
+                    f"{tuple(skip.shape[-2:])} from {tuple(x.shape[-2:])}; "
+                    "use benchmark dimensions compatible with four pooling stages"
+                ) from error
             x = decoder(torch.cat((skip, x), dim=1))
         return self.output(x)
 
 
 class MultiAngleFusion(nn.Module):
-    """Six 1x1x1 convolutions learn voxel-wise weights for A and B (Eq. 5)."""
+    """Six 1x1x1 convolutions learn two independent voxel-wise weights."""
 
     def __init__(self, hidden_channels: int = 8, activation: str = "relu"):
         super().__init__()
@@ -180,8 +182,9 @@ class MultiAngleFusion(nn.Module):
         self.layers = nn.Sequential(*layers)
 
     def forward(self, vertical: Tensor, channel_crossed: Tensor) -> tuple[Tensor, Tensor]:
-        logits = self.layers(torch.cat((vertical, channel_crossed), dim=1))
-        weights = torch.softmax(logits, dim=1)
+        # Equation (5) only specifies w1*A + w2*B. A softmax would impose
+        # positivity and w1+w2=1, neither of which is stated in the paper.
+        weights = self.layers(torch.cat((vertical, channel_crossed), dim=1))
         raw_fused = weights[:, 0:1] * vertical + weights[:, 1:2] * channel_crossed
         return raw_fused, weights
 
@@ -202,12 +205,12 @@ class U3DGPRNet(nn.Module):
         self,
         features: Iterable[int] = (1, 2, 4, 8, 16),
         activation: str = "relu",
-        normalization: str = "batch",
+        normalization: str = "none",
         fusion_hidden_channels: int = 8,
         output_mode: str = "full",
         output_bias_init: float = 0.0,
         output_weight_init: float = 0.1,
-        fusion_logit_init_std: float = 1.0e-3,
+        fusion_weight_init: float = 0.5,
         channel_kernels: Iterable[int] = (3, 3, 3, 1, 1),
         channel_up_kernels: Iterable[int] = (1, 1, 2, 2),
         normalize_final_decoder: bool = True,
@@ -255,13 +258,14 @@ class U3DGPRNet(nn.Module):
             if branch.output.bias is not None:
                 nn.init.constant_(branch.output.bias, float(output_bias_init))
 
-        # Near-zero logits preserve the paper's approximately equal initial
-        # contribution without the exact-zero gradient barrier of zero weights.
+        # The paper initializes both direction weights to 0.5. Zeroing the
+        # final kernel makes the initial weight maps exactly input-independent
+        # constants while leaving the two maps free to learn independently.
         final_fusion = next(
             layer for layer in reversed(self.fusion.layers) if isinstance(layer, nn.Conv3d)
         )
-        nn.init.normal_(final_fusion.weight, mean=0.0, std=float(fusion_logit_init_std))
-        nn.init.zeros_(final_fusion.bias)
+        nn.init.zeros_(final_fusion.weight)
+        nn.init.constant_(final_fusion.bias, float(fusion_weight_init))
 
     def _reset_parameters(self, activation: str) -> None:
         """Use activation-aware initialization so input variance survives."""

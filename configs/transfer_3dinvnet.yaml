@@ -14,7 +14,7 @@ data:
   allow_val_test_overlap: true   # 显式声明接受 val∩test=150；关闭则维持硬拦截
   simulated_manifest: null
   real_manifest: null
-  shape: [128, 128, 128]
+  shape: null                   # preserve each native 3DInvNet 128^3 volume
   axis_order: [1, 2, 0]          # 3DInvNet source [time/depth, x, y] -> [x, y, time/depth]
   # Match the official 3DInvNet loader: (clean_data + 9) / 18. Per-volume
   # z-score erased absolute amplitude information used by the inversion.
@@ -29,7 +29,11 @@ model:
   # Fig. 2. Capacity changes belong in a separate ablation, not strict repro.
   features: [1, 2, 4, 8, 16]
   activation: relu
-  normalization: batch
+  # With fixed-minmax 3DInvNet inputs (std ~= 0.0027), the 83-ReLU narrow
+  # network collapses its vertical branch when normalization is disabled.
+  # BatchNorm is already covered by the failed run; GroupNorm keeps both
+  # branches alive without running-statistics dependence.
+  normalization: group
   fusion_hidden_channels: 8
   channel_kernels: [3, 3, 3, 1, 1]
   channel_up_kernels: [1, 1, 2, 2]
@@ -37,7 +41,7 @@ model:
   output_mode: full
   output_bias_init: 4.0
   output_weight_init: 0.1
-  fusion_logit_init_std: 0.001
+  fusion_weight_init: 0.5
   return_intermediates: true
 
 train:

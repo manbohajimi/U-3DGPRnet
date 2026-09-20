@@ -10,14 +10,14 @@ data:
   real_manifest: null
   shape: [20, 54, 512]
   axis_order: [0, 1, 2]
-  input_normalization: zscore
+  input_normalization: none
   target_scale: 1.0
   num_workers: 4
 
 model:
   features: [1, 2, 4, 8, 16]
   activation: relu
-  normalization: batch
+  normalization: none
   fusion_hidden_channels: 8
   output_mode: full
   return_intermediates: true

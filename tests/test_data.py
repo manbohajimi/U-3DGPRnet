@@ -32,3 +32,25 @@ def test_axis_order_is_applied_before_cubic_shape_short_circuit(tmp_path):
     sample = dataset[0]
     np.testing.assert_array_equal(sample["gpr"][0].numpy(), source.transpose(1, 2, 0))
     np.testing.assert_array_equal(sample["target"][0].numpy(), (source + 100).transpose(1, 2, 0))
+
+
+def test_native_shape_mode_does_not_resize_benchmark_volume(tmp_path):
+    source = np.arange(4 * 5 * 6, dtype=np.float32).reshape(4, 5, 6)
+    input_path = tmp_path / "input.npy"
+    target_path = tmp_path / "target.npy"
+    np.save(input_path, source)
+    np.save(target_path, source + 1)
+    manifest = tmp_path / "manifest.csv"
+    with manifest.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=("id", "input", "target"))
+        writer.writeheader()
+        writer.writerow({"id": "native", "input": input_path, "target": target_path})
+
+    sample = GPRVolumeDataset(
+        manifest,
+        shape=None,
+        input_normalization="none",
+        axis_order=(1, 2, 0),
+    )[0]
+    assert sample["gpr"].shape == (1, 5, 6, 4)
+    np.testing.assert_array_equal(sample["gpr"][0].numpy(), source.transpose(1, 2, 0))

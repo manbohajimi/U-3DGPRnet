@@ -86,15 +86,15 @@ class GPRVolumeDataset(Dataset):
     def __init__(
         self,
         manifest: str | Path,
-        shape: tuple[int, int, int] = CANONICAL_SHAPE,
-        input_normalization: str = "zscore",
+        shape: tuple[int, int, int] | None = None,
+        input_normalization: str = "none",
         target_scale: float = 1.0,
         axis_order: tuple[int, int, int] | None = None,
         input_min: float = -9.0,
         input_max: float = 9.0,
     ):
         self.manifest = Path(manifest)
-        self.shape = tuple(shape)
+        self.shape = tuple(shape) if shape is not None else None
         self.input_normalization = input_normalization
         self.target_scale = float(target_scale)
         self.axis_order = tuple(axis_order) if axis_order is not None else (0, 1, 2)
@@ -119,13 +119,21 @@ class GPRVolumeDataset(Dataset):
         # an incorrect axis interpretation because their shapes do not change.
         gpr = np.transpose(gpr, self.axis_order)
         target = np.transpose(target, self.axis_order)
+        if self.shape is not None:
+            gpr = resize_volume(gpr, self.shape)
+            target = resize_volume(target, self.shape)
+        else:
+            # Unified benchmarks such as 3DInvNet keep their native volume
+            # grid. Only the axis order changes before directional slicing.
+            gpr = np.asarray(gpr, dtype=np.float32)
+            target = np.asarray(target, dtype=np.float32)
         gpr = normalize_gpr(
-            resize_volume(gpr, self.shape),
+            gpr,
             self.input_normalization,
             input_min=self.input_min,
             input_max=self.input_max,
         )
-        target = resize_volume(target, self.shape) / self.target_scale
+        target = target / self.target_scale
         return {
             "id": row.get("id", str(index)),
             "gpr": torch.from_numpy(gpr).unsqueeze(0),

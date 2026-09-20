@@ -30,6 +30,16 @@ def parse_args() -> argparse.Namespace:
         help="Paper-style staged training: vertical, channel_crossed, then full fusion/refinement",
     )
     parser.add_argument("--pretrained", default=None, help="Checkpoint from the preceding stage")
+    parser.add_argument(
+        "--vertical-checkpoint",
+        default=None,
+        help="Load only vertical_branch weights from an independently trained checkpoint",
+    )
+    parser.add_argument(
+        "--channel-checkpoint",
+        default=None,
+        help="Load only channel_branch weights from an independently trained checkpoint",
+    )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -40,14 +50,39 @@ def parse_args() -> argparse.Namespace:
 
 
 def make_dataset(path: str, data_config: dict) -> GPRVolumeDataset:
+    configured_shape = data_config.get("shape")
     return GPRVolumeDataset(
         path,
-        shape=tuple(data_config["shape"]),
+        shape=tuple(configured_shape) if configured_shape is not None else None,
         input_normalization=data_config["input_normalization"],
         target_scale=data_config["target_scale"],
         axis_order=tuple(data_config.get("axis_order", (0, 1, 2))),
         input_min=float(data_config.get("input_min", -9.0)),
         input_max=float(data_config.get("input_max", 9.0)),
+    )
+
+
+def load_branch_checkpoint(model: U3DGPRNet, checkpoint_path: str, branch_name: str) -> None:
+    """Merge one independently trained directional branch into ``model``."""
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint.get("model", checkpoint)
+    prefix = f"{branch_name}."
+    branch_state = {
+        key[len(prefix) :]: value
+        for key, value in state_dict.items()
+        if key.startswith(prefix)
+    }
+    if not branch_state:
+        raise ValueError(
+            f"Checkpoint {checkpoint_path!r} contains no parameters under {prefix!r}"
+        )
+    branch = getattr(model, branch_name)
+    branch.load_state_dict(branch_state, strict=True)
+    print(
+        f"loaded {branch_name} from {checkpoint_path} "
+        f"({len(branch_state)} tensors)",
+        flush=True,
     )
 
 
@@ -121,6 +156,10 @@ def main() -> None:
     if pretrained:
         checkpoint = torch.load(pretrained, map_location="cpu", weights_only=False)
         model.load_state_dict(checkpoint.get("model", checkpoint))
+    if args.vertical_checkpoint:
+        load_branch_checkpoint(model, args.vertical_checkpoint, "vertical_branch")
+    if args.channel_checkpoint:
+        load_branch_checkpoint(model, args.channel_checkpoint, "channel_branch")
 
     stage = args.stage or str(model_kwargs.get("output_mode", "full"))
     if stage == "vertical":

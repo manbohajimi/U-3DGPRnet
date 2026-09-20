@@ -32,7 +32,11 @@ def main() -> None:
     if sorted(axis_order) != [0, 1, 2]:
         raise ValueError(f"axis_order must be a permutation of [0, 1, 2], got {axis_order}")
     volume = np.transpose(volume, axis_order)
-    volume = resize_volume(volume, tuple(data_config["shape"]))
+    configured_shape = data_config.get("shape")
+    if configured_shape is not None:
+        volume = resize_volume(volume, tuple(configured_shape))
+    else:
+        volume = np.asarray(volume, dtype=np.float32)
     volume = normalize_gpr(
         volume,
         data_config["input_normalization"],
